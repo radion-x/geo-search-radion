@@ -81,21 +81,24 @@ export function LocationSearchTool() {
       return
     }
 
-    // Construct Google search URL with proper location parameters
+    // Construct Google search URL exactly like valentin.app
+    // Use Google's location parameters without modifying the search query
     const lat = currentLocation.latitude
     const lng = currentLocation.longitude
-    const locationName = currentLocation.name.split(',')[0] // Use first part of location name
+    const locationName = currentLocation.name.split(',')[0]
     
-    // Multiple strategies to influence Google's location context:
-    // 1. Add location context to the query itself
-    // 2. Use location-specific search terms
-    const enhancedQuery = `${searchQuery} near "${locationName}"`
-    
-    // Create the search URL with location context
+    // Create the search URL with location-based parameters like valentin.app
     const baseUrl = 'https://www.google.com/search'
     const params = new URLSearchParams({
-      q: enhancedQuery,
-      // Additional parameters that may help with location context
+      q: searchQuery, // Keep the original search query unchanged
+      // Use Google's location parameters to set geographic context
+      near: `${lat},${lng}`, // Geographic coordinates
+      uule: `w+CAIQICID${btoa(locationName).replace(/=/g, '')}`, // Encoded location name
+      // Additional parameters for location context
+      gl: currentLocation.country === 'Australia' ? 'au' : 
+          currentLocation.country === 'United States' ? 'us' :
+          currentLocation.country === 'United Kingdom' ? 'gb' : 'us',
+      hl: 'en',
       sourceid: 'chrome',
       ie: 'UTF-8',
     })
@@ -103,7 +106,7 @@ export function LocationSearchTool() {
     const searchUrl = `${baseUrl}?${params.toString()}`
     window.open(searchUrl, '_blank')
     
-    toast.success(`Searching from ${locationName}`)
+    toast.success(`Searching "${searchQuery}" from ${locationName}`)
   }
 
   // Debounced autocomplete function

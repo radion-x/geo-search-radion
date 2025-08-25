@@ -1,5 +1,5 @@
 import { useState, useCallback, useRef } from 'react'
-import { Search, MapPin, Globe, Loader2 } from '@phosphor-icons/react'
+import { MagnifyingGlass as Search, MapPin, Globe, Spinner as Loader2 } from '@phosphor-icons/react'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Card } from '@/components/ui/card'
@@ -17,9 +17,14 @@ export function LocationSearchTool() {
   const [searchQuery, setSearchQuery] = useState('')
   const [isGeocoding, setIsGeocoding] = useState(false)
   const [currentLocation, setCurrentLocation] = useState<LocationData | null>(null)
+  // Stores the raw input string that was last successfully geocoded
+  const [geocodedInput, setGeocodedInput] = useState<string>('')
+  // Indicates user has changed the input since last geocode so stored location is stale
+  const [isLocationDirty, setIsLocationDirty] = useState(false)
   const [locationSuggestions, setLocationSuggestions] = useState<string[]>([])
   const [isLoadingSuggestions, setIsLoadingSuggestions] = useState(false)
-  const timeoutRef = useRef<NodeJS.Timeout | null>(null)
+  // In browser environment setTimeout returns a number
+  const timeoutRef = useRef<number | null>(null)
 
   // Geocoding function using Nominatim API (OpenStreetMap)
   const handleGeocode = async () => {
@@ -61,6 +66,8 @@ export function LocationSearchTool() {
       }
       
       setCurrentLocation(locationData)
+  setGeocodedInput(location)
+  setIsLocationDirty(false)
       toast.success(`Location found: ${locationData.name.split(',')[0]}`)
     } catch (error) {
       console.error('Geocoding error:', error)
@@ -150,6 +157,14 @@ export function LocationSearchTool() {
   const handleLocationInputChange = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
     const value = e.target.value
     setLocation(value)
+    // Mark existing geocode as dirty if it no longer matches the original input used
+    if (geocodedInput && value.trim() !== geocodedInput.trim()) {
+      setIsLocationDirty(true)
+    } else if (!geocodedInput) {
+      setIsLocationDirty(false)
+    } else if (value.trim() === geocodedInput.trim()) {
+      setIsLocationDirty(false)
+    }
     
     // Clear existing timeout
     if (timeoutRef.current) {
@@ -275,19 +290,26 @@ export function LocationSearchTool() {
 
               {/* Current Location Display */}
               {currentLocation && (
-                <div className="bg-green-50 border border-green-200 rounded-lg p-4">
+                <div className={`rounded-lg p-4 border ${isLocationDirty ? 'bg-amber-50 border-amber-300' : 'bg-green-50 border-green-200'}`}>
                   <div className="flex items-center gap-2 text-green-800">
                     <MapPin className="w-4 h-4" />
-                    <span className="font-medium">Search Location Set:</span>
+                    <span className="font-medium">Search Location {isLocationDirty ? 'Stale – Re‑Geocode Needed' : 'Set'}:</span>
                   </div>
                   <div className="mt-1 text-green-700">
                     <div className="font-semibold">{currentLocation.name.split(',').slice(0, 2).join(', ')}</div>
                     <div className="text-sm">
                       {currentLocation.latitude.toFixed(6)}, {currentLocation.longitude.toFixed(6)} • {currentLocation.country}
                     </div>
-                    <div className="text-xs mt-1 text-green-600 bg-green-100 px-2 py-1 rounded">
-                      ✓ Google will show results as if searching from this location
-                    </div>
+                    {!isLocationDirty && (
+                      <div className="text-xs mt-1 text-green-600 bg-green-100 px-2 py-1 rounded">
+                        ✓ Google will show results as if searching from this location
+                      </div>
+                    )}
+                    {isLocationDirty && (
+                      <div className="text-xs mt-2 text-amber-700 bg-amber-100 px-2 py-1 rounded">
+                        The input changed. Click Geocode again to update the location bias.
+                      </div>
+                    )}
                   </div>
                 </div>
               )}
@@ -316,7 +338,7 @@ export function LocationSearchTool() {
                 
                 <Button 
                   onClick={handleSearch}
-                  disabled={!currentLocation || !searchQuery.trim()}
+                  disabled={!currentLocation || !searchQuery.trim() || isLocationDirty}
                   size="lg"
                   className="px-8"
                 >
@@ -328,6 +350,12 @@ export function LocationSearchTool() {
               {!currentLocation && (
                 <div className="text-sm text-gray-500 bg-gray-50 rounded-lg p-3">
                   💡 First geocode a location above, then your searches will show results from that location's perspective
+                </div>
+              )}
+
+              {isLocationDirty && currentLocation && (
+                <div className="text-sm text-amber-700 bg-amber-50 rounded-lg p-3">
+                  The location input changed after the last geocode. Re-run Geocode to refresh before searching.
                 </div>
               )}
 

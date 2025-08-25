@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useState, useCallback, useRef } from 'react'
 import { Search, MapPin, Globe, Loader2 } from '@phosphor-icons/react'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -18,8 +18,10 @@ export function LocationSearchTool() {
   const [isGeocoding, setIsGeocoding] = useState(false)
   const [currentLocation, setCurrentLocation] = useState<LocationData | null>(null)
   const [locationSuggestions, setLocationSuggestions] = useState<string[]>([])
+  const [isLoadingSuggestions, setIsLoadingSuggestions] = useState(false)
+  const timeoutRef = useRef<NodeJS.Timeout | null>(null)
 
-  // Mock geocoding function - in a real implementation, this would use a geocoding API
+  // Geocoding function using Nominatim API (OpenStreetMap)
   const handleGeocode = async () => {
     if (!location.trim()) {
       toast.error('Please enter a location')
@@ -29,21 +31,40 @@ export function LocationSearchTool() {
     setIsGeocoding(true)
     
     try {
-      // Simulate API call delay
-      await new Promise(resolve => setTimeout(resolve, 800))
+      // Use Nominatim API for geocoding (free, no API key required)
+      const response = await fetch(
+        `https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(location)}&limit=1&addressdetails=1`,
+        {
+          headers: {
+            'User-Agent': 'LocationSearchTool/1.0'
+          }
+        }
+      )
       
-      // Mock location data - in real implementation, use geocoding API
-      const mockLocationData: LocationData = {
-        name: location,
-        latitude: -33.8688 + Math.random() * 10 - 5, // Random coordinates for demo
-        longitude: 151.2093 + Math.random() * 10 - 5,
-        country: 'Australia' // Mock country
+      if (!response.ok) {
+        throw new Error('Geocoding request failed')
       }
       
-      setCurrentLocation(mockLocationData)
-      toast.success(`Location found: ${mockLocationData.name}`)
+      const data = await response.json()
+      
+      if (data.length === 0) {
+        toast.error('Location not found. Please try a different search term.')
+        return
+      }
+      
+      const result = data[0]
+      const locationData: LocationData = {
+        name: result.display_name,
+        latitude: parseFloat(result.lat),
+        longitude: parseFloat(result.lon),
+        country: result.address?.country || 'Unknown'
+      }
+      
+      setCurrentLocation(locationData)
+      toast.success(`Location found: ${locationData.name.split(',')[0]}`)
     } catch (error) {
-      toast.error('Failed to geocode location')
+      console.error('Geocoding error:', error)
+      toast.error('Failed to geocode location. Please try again.')
     } finally {
       setIsGeocoding(false)
     }
@@ -60,37 +81,80 @@ export function LocationSearchTool() {
       return
     }
 
-    // Construct Google search URL with location parameters
-    const searchParams = new URLSearchParams({
-      q: searchQuery,
-      near: currentLocation.name,
-      // Add more location-specific parameters as needed
+    // Construct Google search URL with proper location parameters
+    const lat = currentLocation.latitude
+    const lng = currentLocation.longitude
+    const locationName = currentLocation.name.split(',')[0] // Use first part of location name
+    
+    // Multiple strategies to influence Google's location context:
+    // 1. Add location context to the query itself
+    // 2. Use location-specific search terms
+    const enhancedQuery = `${searchQuery} near "${locationName}"`
+    
+    // Create the search URL with location context
+    const baseUrl = 'https://www.google.com/search'
+    const params = new URLSearchParams({
+      q: enhancedQuery,
+      // Additional parameters that may help with location context
+      sourceid: 'chrome',
+      ie: 'UTF-8',
     })
     
-    const searchUrl = `https://www.google.com/search?${searchParams.toString()}`
+    const searchUrl = `${baseUrl}?${params.toString()}`
     window.open(searchUrl, '_blank')
     
-    toast.success(`Searching from ${currentLocation.name}`)
+    toast.success(`Searching from ${locationName}`)
   }
 
-  const handleLocationInputChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+  // Debounced autocomplete function
+  const handleLocationInputChange = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
     const value = e.target.value
     setLocation(value)
     
-    // Mock autocomplete suggestions
+    // Clear existing timeout
+    if (timeoutRef.current) {
+      clearTimeout(timeoutRef.current)
+    }
+    
     if (value.length > 2) {
-      const mockSuggestions = [
-        `${value}, NSW, Australia`,
-        `${value}, VIC, Australia`,
-        `${value}, QLD, Australia`,
-        `${value}, USA`,
-        `${value}, UK`
-      ].slice(0, 3)
-      setLocationSuggestions(mockSuggestions)
+      // Debounce the API call by 300ms
+      timeoutRef.current = setTimeout(async () => {
+        setIsLoadingSuggestions(true)
+        
+        try {
+          // Use Nominatim API for autocomplete suggestions
+          const response = await fetch(
+            `https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(value)}&limit=5&addressdetails=1`,
+            {
+              headers: {
+                'User-Agent': 'LocationSearchTool/1.0'
+              }
+            }
+          )
+          
+          if (response.ok) {
+            const data = await response.json()
+            const suggestions = data.map((item: any) => item.display_name).slice(0, 3)
+            setLocationSuggestions(suggestions)
+          }
+        } catch (error) {
+          console.error('Autocomplete error:', error)
+          // Fallback to mock suggestions on error
+          const mockSuggestions = [
+            `${value}, NSW, Australia`,
+            `${value}, USA`,
+            `${value}, UK`
+          ]
+          setLocationSuggestions(mockSuggestions)
+        } finally {
+          setIsLoadingSuggestions(false)
+        }
+      }, 300)
     } else {
       setLocationSuggestions([])
+      setIsLoadingSuggestions(false)
     }
-  }
+  }, [])
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-blue-50 to-indigo-50 p-4">
@@ -127,20 +191,27 @@ export function LocationSearchTool() {
                   />
                   
                   {/* Autocomplete suggestions */}
-                  {locationSuggestions.length > 0 && (
+                  {(locationSuggestions.length > 0 || isLoadingSuggestions) && (
                     <div className="absolute top-full left-0 right-0 bg-white border border-gray-200 rounded-md shadow-lg z-10 mt-1">
-                      {locationSuggestions.map((suggestion, index) => (
-                        <button
-                          key={index}
-                          className="w-full text-left px-4 py-2 hover:bg-gray-50 first:rounded-t-md last:rounded-b-md"
-                          onClick={() => {
-                            setLocation(suggestion)
-                            setLocationSuggestions([])
-                          }}
-                        >
-                          {suggestion}
-                        </button>
-                      ))}
+                      {isLoadingSuggestions ? (
+                        <div className="px-4 py-3 text-gray-500 flex items-center gap-2">
+                          <Loader2 className="w-4 h-4 animate-spin" />
+                          Finding locations...
+                        </div>
+                      ) : (
+                        locationSuggestions.map((suggestion, index) => (
+                          <button
+                            key={index}
+                            className="w-full text-left px-4 py-2 hover:bg-gray-50 first:rounded-t-md last:rounded-b-md"
+                            onClick={() => {
+                              setLocation(suggestion)
+                              setLocationSuggestions([])
+                            }}
+                          >
+                            {suggestion}
+                          </button>
+                        ))
+                      )}
                     </div>
                   )}
                 </div>
@@ -170,7 +241,7 @@ export function LocationSearchTool() {
                     <span className="font-medium">Location Set:</span>
                   </div>
                   <div className="mt-1 text-green-700">
-                    <div className="font-semibold">{currentLocation.name}</div>
+                    <div className="font-semibold">{currentLocation.name.split(',').slice(0, 2).join(', ')}</div>
                     <div className="text-sm">
                       {currentLocation.latitude.toFixed(6)}, {currentLocation.longitude.toFixed(6)} • {currentLocation.country}
                     </div>

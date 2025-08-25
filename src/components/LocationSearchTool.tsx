@@ -10,6 +10,8 @@ interface LocationData {
   latitude: number
   longitude: number
   country: string
+  city?: string
+  state?: string
 }
 
 export function LocationSearchTool() {
@@ -62,7 +64,9 @@ export function LocationSearchTool() {
         name: result.display_name,
         latitude: parseFloat(result.lat),
         longitude: parseFloat(result.lon),
-        country: result.address?.country || 'Unknown'
+        country: result.address?.country || 'Unknown',
+        city: result.address?.city || result.address?.town || result.address?.village || result.address?.hamlet || result.address?.suburb || result.address?.county,
+        state: result.address?.state || result.address?.state_district || result.address?.region
       }
       
       setCurrentLocation(locationData)
@@ -99,7 +103,7 @@ export function LocationSearchTool() {
   }
 
   const buildSearchUrl = ({ query, locationName, lat, lng, countryCode }: BuildSearchUrlArgs) => {
-    const base = 'https://www.google.com/search'
+  const base = `https://www.google.${getGoogleTld(countryCode)}/search`
     const params = new URLSearchParams()
     params.set('q', query)
     params.set('gl', countryCode)
@@ -115,6 +119,57 @@ export function LocationSearchTool() {
     params.set('ll', `${lat},${lng}`)
     params.set('nfpr', '1')
     return `${base}?${params.toString()}`
+  }
+
+  const [searchVariants, setSearchVariants] = useState<{ label: string; url: string; note?: string }[]>([])
+
+  const buildDisplayLocation = (loc: LocationData): string => {
+    const parts = [loc.city, loc.state, loc.country].filter(Boolean)
+    if (parts.length === 0) return loc.country || 'United States'
+    return parts.join(', ')
+  }
+
+  const getGoogleTld = (countryCode: string): string => {
+    const map: Record<string, string> = {
+      au: 'com.au', gb: 'co.uk', us: 'com', ca: 'ca', de: 'de', fr: 'fr', jp: 'co.jp', in: 'co.in', br: 'com.br', it: 'it', es: 'es', nl: 'nl', se: 'se', dk: 'dk', fi: 'fi', nz: 'co.nz'
+    }
+    return map[countryCode] || 'com'
+  }
+
+  const buildAllSearchUrls = (args: { query: string; loc: LocationData }) => {
+    const { query, loc } = args
+    const lat = loc.latitude
+    const lng = loc.longitude
+    const countryCode = getCountryCode(loc.country).toLowerCase()
+    const conciseLocation = buildDisplayLocation(loc)
+
+    // Primary (rich params)
+    const primary = buildSearchUrl({
+      query,
+      locationName: conciseLocation,
+      lat,
+      lng,
+      countryCode
+    })
+
+    // Coordinate focused (less text hints)
+    const params2 = new URLSearchParams({ q: query, gl: countryCode, hl: 'en', sll: `${lat},${lng}`, ll: `${lat},${lng}`, pws: '0', nfpr: '1' })
+    const coordUrl = `https://www.google.${getGoogleTld(countryCode)}/search?${params2.toString()}`
+
+    // Near emphasis
+    const params3 = new URLSearchParams({ q: query, near: conciseLocation, gl: countryCode, hl: 'en', pws: '0' })
+    const nearUrl = `https://www.google.${getGoogleTld(countryCode)}/search?${params3.toString()}`
+
+    // Local (maps/local vertical) – may show local pack differently
+    const params4 = new URLSearchParams({ q: query, gl: countryCode, hl: 'en', tbm: 'lcl', near: conciseLocation })
+    const localUrl = `https://www.google.${getGoogleTld(countryCode)}/search?${params4.toString()}`
+
+    return [
+      { label: 'Primary (Full Bias)', url: primary, note: 'UULE + coords + near/location' },
+      { label: 'Coordinates Only', url: coordUrl, note: 'Relies mainly on lat/long' },
+      { label: 'Near Emphasis', url: nearUrl, note: 'Uses near param textual bias' },
+      { label: 'Local Vertical', url: localUrl, note: 'tbm=lcl experimental' }
+    ]
   }
 
   const handleSearch = () => {
@@ -133,23 +188,11 @@ export function LocationSearchTool() {
       return
     }
 
-    const lat = currentLocation.latitude
-    const lng = currentLocation.longitude
-    const locationName = currentLocation.name.split(',').slice(0,2).join(', ').trim()
-    const countryCode = getCountryCode(currentLocation.country).toLowerCase()
-
-    // Strongest attempt: include uule (encoded location), sll coords, gl country, disable personalization
-    const searchUrl = buildSearchUrl({
-      query: searchQuery,
-      locationName,
-      lat,
-      lng,
-      countryCode,
-    })
-
-    console.log('Search (forced location) URL:', searchUrl)
-    window.open(searchUrl, '_blank', 'noopener')
-    toast.success(`Searching from ${locationName}`)
+  const variants = buildAllSearchUrls({ query: searchQuery, loc: currentLocation })
+  setSearchVariants(variants)
+  const primary = variants[0]
+  window.open(primary.url, '_blank', 'noopener')
+  toast.success(`Searching from ${buildDisplayLocation(currentLocation)}`)
   }
 
   
@@ -178,6 +221,15 @@ export function LocationSearchTool() {
     }
     
     return countryMappings[country] || 'US' // Default to US if country not found
+  }
+
+  const copyToClipboard = (text: string) => {
+    try {
+      navigator.clipboard.writeText(text)
+      toast.success('Copied URL to clipboard')
+    } catch {
+      toast.error('Copy failed')
+    }
   }
 
   // Debounced autocomplete function
@@ -400,6 +452,36 @@ export function LocationSearchTool() {
                     📍 Location: {currentLocation.name.split(',')[0]}, {currentLocation.country}
                     <br />
                     🌐 Coordinates: {currentLocation.latitude.toFixed(4)}, {currentLocation.longitude.toFixed(4)}
+                  </div>
+                </div>
+              )}
+
+              {searchVariants.length > 0 && (
+                <div className="mt-4 space-y-2">
+                  <div className="text-xs font-semibold text-gray-700">Opened primary tab. Alternate variants:</div>
+                  <ul className="space-y-1">
+                    {searchVariants.map(v => (
+                      <li key={v.label} className="text-xs bg-white border rounded p-2 flex flex-col gap-1">
+                        <div className="flex items-center justify-between">
+                          <span className="font-medium text-gray-800">{v.label}</span>
+                          <div className="flex gap-2">
+                            <button
+                              onClick={() => window.open(v.url, '_blank', 'noopener')}
+                              className="text-blue-600 hover:underline"
+                            >Open</button>
+                            <button
+                              onClick={() => copyToClipboard(v.url)}
+                              className="text-gray-600 hover:underline"
+                            >Copy</button>
+                          </div>
+                        </div>
+                        {v.note && <div className="text-[10px] text-gray-500">{v.note}</div>}
+                        <div className="break-all text-[10px] text-gray-500">{v.url}</div>
+                      </li>
+                    ))}
+                  </ul>
+                  <div className="text-[10px] text-gray-500 leading-snug">
+                    Tip: For stricter location simulation open these URLs in an Incognito window (no login), or via a VPN/proxy in the target region. Client parameters cannot fully override IP-based geolocation.
                   </div>
                 </div>
               )}

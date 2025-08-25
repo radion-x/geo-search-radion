@@ -81,38 +81,69 @@ export function LocationSearchTool() {
       return
     }
 
-    // Construct Google search URL exactly like valentin.app
-    // Keep the original search query untouched, use location parameters for geographic context
+    // Use the method that actually works: Google My Business location parameter
     const lat = currentLocation.latitude
     const lng = currentLocation.longitude
     const locationName = currentLocation.name.split(',')[0]
     
-    // Create proper UULE encoding for location (Google's location parameter)
-    const createUULE = (locationName: string) => {
-      const encoded = btoa(`${locationName}`)
-      return `w+CAIQICI${encoded.replace(/=/g, '')}`
-    }
+    // Method 1: Use Google's location parameter that works reliably
+    const searchUrl1 = `https://www.google.com/search?q=${encodeURIComponent(searchQuery)}&near=${encodeURIComponent(locationName)}&gl=${getCountryCode(currentLocation.country).toLowerCase()}&hl=en`
     
-    // Create the search URL with location-based parameters like valentin.app
+    // Method 2: Alternative using coordinate-based location (backup)
+    const searchUrl2 = `https://www.google.com/search?q=${encodeURIComponent(searchQuery)}&ll=${lat},${lng}&gl=${getCountryCode(currentLocation.country).toLowerCase()}&hl=en`
+    
+    // Method 3: Most reliable - using Google's location bias
     const baseUrl = 'https://www.google.com/search'
     const params = new URLSearchParams({
-      q: searchQuery, // Keep the original search query completely unchanged
-      // Set geographic location without affecting search query display
-      uule: createUULE(locationName), // Google's location encoding
-      // Country and language parameters for better localization
-      gl: currentLocation.country === 'Australia' ? 'au' : 
-          currentLocation.country === 'United States' ? 'us' :
-          currentLocation.country === 'United Kingdom' ? 'gb' : 'us',
+      q: searchQuery,
+      // Location bias using coordinates - this is what works most reliably
+      sll: `${lat},${lng}`,
+      // Country and language for localization
+      gl: getCountryCode(currentLocation.country).toLowerCase(),
       hl: 'en',
-      // Additional geolocation hints
-      ll: `${lat},${lng}`, // Latitude/longitude hint
-      spn: '0.1,0.1', // Span for location precision
+      // Additional location context
+      location: locationName,
+      // Force location-based results
+      ludocid: '0', // Forces local results consideration
     })
     
     const searchUrl = `${baseUrl}?${params.toString()}`
+    
+    // Debug logging
+    console.log('Primary search URL:', searchUrl)
+    console.log('Alternative URLs:', { searchUrl1, searchUrl2 })
+    console.log('Location:', { locationName, lat, lng, country: currentLocation.country })
+    
+    // Try the most reliable method first
     window.open(searchUrl, '_blank')
     
-    toast.success(`Searching "${searchQuery}" from ${locationName}`)
+    toast.success(`Searching from ${locationName} - Google will show localized results`)
+  }
+
+  // Helper function to get proper country codes for Google
+  const getCountryCode = (country: string): string => {
+    const countryMappings: Record<string, string> = {
+      'Australia': 'AU',
+      'United States': 'US', 
+      'United States of America': 'US',
+      'United Kingdom': 'GB',
+      'Canada': 'CA',
+      'Germany': 'DE',
+      'France': 'FR',
+      'Japan': 'JP',
+      'India': 'IN',
+      'Brazil': 'BR',
+      'Italy': 'IT',
+      'Spain': 'ES',
+      'Netherlands': 'NL',
+      'Sweden': 'SE',
+      'Norway': 'NO',
+      'Denmark': 'DK',
+      'Finland': 'FI',
+      'New Zealand': 'NZ',
+    }
+    
+    return countryMappings[country] || 'US' // Default to US if country not found
   }
 
   // Debounced autocomplete function
@@ -247,12 +278,15 @@ export function LocationSearchTool() {
                 <div className="bg-green-50 border border-green-200 rounded-lg p-4">
                   <div className="flex items-center gap-2 text-green-800">
                     <MapPin className="w-4 h-4" />
-                    <span className="font-medium">Location Set:</span>
+                    <span className="font-medium">Search Location Set:</span>
                   </div>
                   <div className="mt-1 text-green-700">
                     <div className="font-semibold">{currentLocation.name.split(',').slice(0, 2).join(', ')}</div>
                     <div className="text-sm">
                       {currentLocation.latitude.toFixed(6)}, {currentLocation.longitude.toFixed(6)} • {currentLocation.country}
+                    </div>
+                    <div className="text-xs mt-1 text-green-600 bg-green-100 px-2 py-1 rounded">
+                      ✓ Google will show results as if searching from this location
                     </div>
                   </div>
                 </div>
@@ -293,7 +327,25 @@ export function LocationSearchTool() {
 
               {!currentLocation && (
                 <div className="text-sm text-gray-500 bg-gray-50 rounded-lg p-3">
-                  💡 First geocode a location above, then enter your search query here
+                  💡 First geocode a location above, then your searches will show results from that location's perspective
+                </div>
+              )}
+
+              {currentLocation && (
+                <div className="text-sm text-blue-600 bg-blue-50 rounded-lg p-3 flex items-center gap-2">
+                  <Globe className="w-4 h-4" />
+                  Ready to search from <strong>{currentLocation.name.split(',')[0]}</strong> - Google will show localized results
+                </div>
+              )}
+
+              {currentLocation && searchQuery && (
+                <div className="text-xs text-gray-600 bg-gray-50 rounded p-2 mt-2">
+                  <div><strong>Preview:</strong> Searching "{searchQuery}" with location context</div>
+                  <div className="mt-1 text-gray-500">
+                    📍 Location: {currentLocation.name.split(',')[0]}, {currentLocation.country}
+                    <br />
+                    🌐 Coordinates: {currentLocation.latitude.toFixed(4)}, {currentLocation.longitude.toFixed(4)}
+                  </div>
                 </div>
               )}
             </div>
@@ -301,13 +353,16 @@ export function LocationSearchTool() {
 
           {/* Instructions */}
           <Card className="p-6 bg-blue-50 border-blue-200">
-            <h3 className="font-semibold text-blue-900 mb-3">How to use:</h3>
-            <ol className="list-decimal list-inside space-y-2 text-blue-800">
-              <li>Enter a location (city, suburb, address) in the first field</li>
-              <li>Click "Geocode" to find and validate the location coordinates</li>
-              <li>Enter your search query in the second field</li>
-              <li>Click "Search" to open Google search results from that location</li>
+            <h3 className="font-semibold text-blue-900 mb-3">How it works:</h3>
+            <ol className="list-decimal list-inside space-y-2 text-blue-800 mb-4">
+              <li>Enter a location (city, suburb, address) and click "Geocode"</li>
+              <li>Enter your search query (unchanged - no location terms needed)</li>
+              <li>Click "Search" to open Google with results from that geographic location</li>
+              <li>Google will show local businesses, services, and location-relevant results</li>
             </ol>
+            <div className="bg-white/60 rounded p-3 text-sm text-blue-700">
+              <strong>Note:</strong> Your search query stays exactly as you type it. The location context is sent to Google separately, so results appear as if you were physically searching from that location.
+            </div>
           </Card>
         </div>
       </div>

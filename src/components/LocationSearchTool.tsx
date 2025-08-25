@@ -82,25 +82,31 @@ export function LocationSearchTool() {
     }
 
     // Construct Google search URL exactly like valentin.app
-    // Use Google's location parameters without modifying the search query
+    // Keep the original search query untouched, use location parameters for geographic context
     const lat = currentLocation.latitude
     const lng = currentLocation.longitude
     const locationName = currentLocation.name.split(',')[0]
     
+    // Create proper UULE encoding for location (Google's location parameter)
+    const createUULE = (locationName: string) => {
+      const encoded = btoa(`${locationName}`)
+      return `w+CAIQICI${encoded.replace(/=/g, '')}`
+    }
+    
     // Create the search URL with location-based parameters like valentin.app
     const baseUrl = 'https://www.google.com/search'
     const params = new URLSearchParams({
-      q: searchQuery, // Keep the original search query unchanged
-      // Use Google's location parameters to set geographic context
-      near: `${lat},${lng}`, // Geographic coordinates
-      uule: `w+CAIQICID${btoa(locationName).replace(/=/g, '')}`, // Encoded location name
-      // Additional parameters for location context
+      q: searchQuery, // Keep the original search query completely unchanged
+      // Set geographic location without affecting search query display
+      uule: createUULE(locationName), // Google's location encoding
+      // Country and language parameters for better localization
       gl: currentLocation.country === 'Australia' ? 'au' : 
           currentLocation.country === 'United States' ? 'us' :
           currentLocation.country === 'United Kingdom' ? 'gb' : 'us',
       hl: 'en',
-      sourceid: 'chrome',
-      ie: 'UTF-8',
+      // Additional geolocation hints
+      ll: `${lat},${lng}`, // Latitude/longitude hint
+      spn: '0.1,0.1', // Span for location precision
     })
     
     const searchUrl = `${baseUrl}?${params.toString()}`

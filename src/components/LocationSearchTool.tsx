@@ -77,6 +77,40 @@ export function LocationSearchTool() {
     }
   }
 
+  interface BuildSearchUrlArgs {
+    query: string
+    locationName: string
+    lat: number
+    lng: number
+    countryCode: string
+  }
+
+  const encodeUule = (loc: string): string => {
+    try {
+      const b64 = btoa(unescape(encodeURIComponent(loc)))
+      return `w+CAIQICI${b64}`
+    } catch {
+      return `w+CAIQICI${loc}`
+    }
+  }
+
+  const buildSearchUrl = ({ query, locationName, lat, lng, countryCode }: BuildSearchUrlArgs) => {
+    const base = 'https://www.google.com/search'
+    const params = new URLSearchParams()
+    params.set('q', query)
+    params.set('gl', countryCode)
+    params.set('hl', 'en')
+    params.set('sll', `${lat},${lng}`)
+    params.set('uule', encodeUule(locationName))
+    params.set('near', locationName)
+    params.set('location', locationName)
+    params.set('pws', '0')
+    params.set('gws_rd', 'cr')
+    params.set('ll', `${lat},${lng}`)
+    params.set('nfpr', '1')
+    return `${base}?${params.toString()}`
+  }
+
   const handleSearch = () => {
     if (!searchQuery.trim()) {
       toast.error('Please enter a search query')
@@ -88,44 +122,31 @@ export function LocationSearchTool() {
       return
     }
 
-    // Use the method that actually works: Google My Business location parameter
+    if (isLocationDirty) {
+      toast.error('Re-geocode the location before searching')
+      return
+    }
+
     const lat = currentLocation.latitude
     const lng = currentLocation.longitude
-    const locationName = currentLocation.name.split(',')[0]
-    
-    // Method 1: Use Google's location parameter that works reliably
-    const searchUrl1 = `https://www.google.com/search?q=${encodeURIComponent(searchQuery)}&near=${encodeURIComponent(locationName)}&gl=${getCountryCode(currentLocation.country).toLowerCase()}&hl=en`
-    
-    // Method 2: Alternative using coordinate-based location (backup)
-    const searchUrl2 = `https://www.google.com/search?q=${encodeURIComponent(searchQuery)}&ll=${lat},${lng}&gl=${getCountryCode(currentLocation.country).toLowerCase()}&hl=en`
-    
-    // Method 3: Most reliable - using Google's location bias
-    const baseUrl = 'https://www.google.com/search'
-    const params = new URLSearchParams({
-      q: searchQuery,
-      // Location bias using coordinates - this is what works most reliably
-      sll: `${lat},${lng}`,
-      // Country and language for localization
-      gl: getCountryCode(currentLocation.country).toLowerCase(),
-      hl: 'en',
-      // Additional location context
-      location: locationName,
-      // Force location-based results
-      ludocid: '0', // Forces local results consideration
+    const locationName = currentLocation.name.split(',').slice(0,2).join(', ').trim()
+    const countryCode = getCountryCode(currentLocation.country).toLowerCase()
+
+    // Strongest attempt: include uule (encoded location), sll coords, gl country, disable personalization
+    const searchUrl = buildSearchUrl({
+      query: searchQuery,
+      locationName,
+      lat,
+      lng,
+      countryCode,
     })
-    
-    const searchUrl = `${baseUrl}?${params.toString()}`
-    
-    // Debug logging
-    console.log('Primary search URL:', searchUrl)
-    console.log('Alternative URLs:', { searchUrl1, searchUrl2 })
-    console.log('Location:', { locationName, lat, lng, country: currentLocation.country })
-    
-    // Try the most reliable method first
-    window.open(searchUrl, '_blank')
-    
-    toast.success(`Searching from ${locationName} - Google will show localized results`)
+
+    console.log('Search (forced location) URL:', searchUrl)
+    window.open(searchUrl, '_blank', 'noopener')
+    toast.success(`Searching from ${locationName}`)
   }
+
+  
 
   // Helper function to get proper country codes for Google
   const getCountryCode = (country: string): string => {

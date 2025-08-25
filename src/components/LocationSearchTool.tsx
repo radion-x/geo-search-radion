@@ -87,8 +87,12 @@ export function LocationSearchTool() {
 
   const encodeUule = (loc: string): string => {
     try {
-      const b64 = btoa(unescape(encodeURIComponent(loc)))
-      return `w+CAIQICI${b64}`
+  // Proper-ish UULE: constant prefix + base64( <length byte><location string> )
+  const utf8 = unescape(encodeURIComponent(loc))
+  const len = String.fromCharCode(utf8.length)
+  const payload = len + utf8
+  const b64 = btoa(payload)
+  return `w+CAIQICI${b64}`
     } catch {
       return `w+CAIQICI${loc}`
     }
@@ -100,6 +104,8 @@ export function LocationSearchTool() {
     params.set('q', query)
     params.set('gl', countryCode)
     params.set('hl', 'en')
+  // Country restrict (cr=countryXX) – helps reduce influence of user IP if different.
+  params.set('cr', `country${countryCode.toUpperCase()}`)
     params.set('sll', `${lat},${lng}`)
     params.set('uule', encodeUule(locationName))
     params.set('near', locationName)
